@@ -1,0 +1,7 @@
+{
+  "name": "Grand Luxury Interactive Christmas Tree",
+  "description": "A high-fidelity, Trump-style luxury 3D Christmas experience featuring a dynamic chaos-to-form animation, emerald and gold aesthetics, and cinematic bloom effects.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
