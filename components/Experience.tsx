@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { OrbitControls, Environment, PerspectiveCamera, ContactShadows } from '@react-three/drei';
+import { OrbitControls, Environment, PerspectiveCamera, ContactShadows, Lightformer } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -27,13 +27,24 @@ const Experience: React.FC<ExperienceProps> = ({ treeState, memories, rotationSp
   const BASE_SPEED = 0.2;
 
   useFrame((state, delta) => {
-    // Smooth damp towards target state
+    // --- Unified Logic ---
+    const isHandInputActive = cursorRef.current.isHandOpen;
+    const isChaosState = treeState === TreeState.CHAOS;
+    
+    // Active means we want the particles to spread out completely.
+    const isActive = isHandInputActive || isChaosState;
+
+    // Target Dispersion: 1.0 when active (Explode/Spread)
+    const targetDispersion = isActive ? 1.0 : 0.0;
+    cursorRef.current.dispersion = targetDispersion;
+
+    // Target Progress: 
+    // If Active -> 0 (Chaos Shape / Random Sphere)
+    // If Inactive -> 1 (Formed Tree)
+    // This ensures we don't just "open the tree", but dissolve it into chaos.
+    const targetProgress = isActive ? 0.0 : 1.0;
     const step = delta * ANIMATION_SPEED;
-    if (treeState === TreeState.FORMED) {
-       progress.current = THREE.MathUtils.lerp(progress.current, 1, step);
-    } else {
-       progress.current = THREE.MathUtils.lerp(progress.current, 0, step);
-    }
+    progress.current = THREE.MathUtils.lerp(progress.current, targetProgress, step);
 
     // --- Rotation Logic ---
     // Apply rotation speed to the group
@@ -42,13 +53,12 @@ const Experience: React.FC<ExperienceProps> = ({ treeState, memories, rotationSp
     }
 
     // Inertia: Smoothly return rotation speed to base speed
-    // If user swipes, speed increases. This gradually brings it back to auto-rotate.
     rotationSpeedRef.current = THREE.MathUtils.lerp(rotationSpeedRef.current, BASE_SPEED, delta * 2);
   });
 
   return (
     <>
-      {/* Moved camera back to see the larger tree (Z: 24 -> 38, Y: 2 -> 6) */}
+      {/* Moved camera back to see the larger tree/cloud (Z: 24 -> 38, Y: 2 -> 6) */}
       <PerspectiveCamera makeDefault position={[0, 6, 38]} fov={50} />
       <OrbitControls 
         enablePan={false} 
@@ -56,13 +66,21 @@ const Experience: React.FC<ExperienceProps> = ({ treeState, memories, rotationSp
         maxPolarAngle={Math.PI / 1.8}
         minDistance={15}
         maxDistance={60}
-        // Disable autoRotate in OrbitControls because we rotate the group manually
         autoRotate={false} 
       />
 
       {/* Lighting & Environment */}
       <ambientLight intensity={0.2} />
-      <Environment preset="lobby" />
+      
+      <Environment resolution={256}>
+        <group rotation={[-Math.PI / 3, 0, 1]}>
+          <Lightformer intensity={4} rotation-x={Math.PI / 2} position={[0, 5, -9]} scale={[10, 10, 1]} />
+          <Lightformer intensity={2} rotation-y={Math.PI / 2} position={[-5, 1, -1]} scale={[10, 2, 1]} />
+          <Lightformer intensity={2} rotation-y={Math.PI / 2} position={[-5, -1, -1]} scale={[10, 2, 1]} />
+          <Lightformer intensity={2} rotation-y={-Math.PI / 2} position={[10, 1, 0]} scale={[20, 10, 1]} />
+          <Lightformer intensity={2} color="#D4AF37" rotation-y={-Math.PI / 2} position={[-10, -5, 0]} scale={[20, 10, 1]} />
+        </group>
+      </Environment>
       
       <spotLight 
         position={[10, 30, 10]} 
@@ -74,12 +92,10 @@ const Experience: React.FC<ExperienceProps> = ({ treeState, memories, rotationSp
       />
       
       {/* Main Rotating Group */}
-      {/* Moved group down to keep tree centered (Y: -6 -> -10) */}
       <group ref={groupRef} position={[0, -10, 0]}>
-        {/* The Tree Components */}
-        <TreeFoliage progress={progress} />
-        <Ornaments progress={progress} />
-        <Star progress={progress} />
+        <TreeFoliage progress={progress} cursorRef={cursorRef} />
+        <Ornaments progress={progress} cursorRef={cursorRef} />
+        <Star progress={progress} cursorRef={cursorRef} />
         {memories.length > 0 && (
           <PhotoStrip 
             progress={progress} 
@@ -89,7 +105,6 @@ const Experience: React.FC<ExperienceProps> = ({ treeState, memories, rotationSp
           />
         )}
         
-        {/* Floor Reflections */}
         <ContactShadows 
           opacity={0.7} 
           scale={50} 
@@ -100,7 +115,6 @@ const Experience: React.FC<ExperienceProps> = ({ treeState, memories, rotationSp
         />
       </group>
 
-      {/* Post Processing for Cinematic Luxury */}
       <EffectComposer disableNormalPass>
         <Bloom 
           luminanceThreshold={0.8} 

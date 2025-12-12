@@ -2,15 +2,17 @@ import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TREE_CONFIG, CHAOS_RADIUS, ORNAMENT_TYPES } from '../constants';
-import { OrnamentData } from '../types';
+import { OrnamentData, CursorData } from '../types';
 
 interface OrnamentsProps {
   progress: React.MutableRefObject<number>;
+  cursorRef: React.MutableRefObject<CursorData>;
 }
 
-const Ornaments: React.FC<OrnamentsProps> = ({ progress }) => {
+const Ornaments: React.FC<OrnamentsProps> = ({ progress, cursorRef }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const lightMeshRef = useRef<THREE.InstancedMesh>(null);
+  const dispersionValue = useRef(0);
 
   // Separate data generation for heavy ornaments (mesh) and lights (emissive mesh)
   const { ornaments, lights } = useMemo(() => {
@@ -91,6 +93,7 @@ const Ornaments: React.FC<OrnamentsProps> = ({ progress }) => {
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const tempPos = useMemo(() => new THREE.Vector3(), []);
   const tempColor = useMemo(() => new THREE.Color(), []);
+  const tempDir = useMemo(() => new THREE.Vector3(), []); // For dispersion direction
 
   useLayoutEffect(() => {
     // Initial color setting
@@ -112,22 +115,16 @@ const Ornaments: React.FC<OrnamentsProps> = ({ progress }) => {
 
   useFrame((state, delta) => {
     const p = progress.current; // 0 to 1
+    
+    // Smoothly interpolate dispersion value
+    const targetDispersion = cursorRef.current.dispersion;
+    dispersionValue.current = THREE.MathUtils.lerp(dispersionValue.current, targetDispersion, delta * 3.0);
+    const d = dispersionValue.current;
 
     // Update Ornaments (Balls/Gifts)
     if (meshRef.current) {
       ornaments.forEach((data, i) => {
-        // Custom easing per particle based on speed/weight
-        // We want them to arrive at different times.
-        // Effective progress = clamp((p * speed_factor) - delay, 0, 1)
-        // Simplification: Lerp the position based on global progress, but lag slightly for heavy items
-        
-        // Let's use a simpler lerp with different speeds if we were doing physics, 
-        // but since 'progress' is driven by the parent, we need to map 'progress' to 'localProgress'.
-        
-        // P goes 0->1. 
-        // Light items: 0 -> 0.8 range of P
-        // Heavy items: 0.2 -> 1.0 range of P
-        
+        // 1. Calculate Base Position (Chaos <-> Formed)
         let localP = 0;
         if (data.type === 'GIFT') {
            localP = THREE.MathUtils.smoothstep(p, 0.2, 1.0);
@@ -136,6 +133,18 @@ const Ornaments: React.FC<OrnamentsProps> = ({ progress }) => {
         }
         
         tempPos.lerpVectors(data.chaosPos, data.targetPos, localP);
+
+        // 2. Apply Dispersion (Explode outwards)
+        if (d > 0.001) {
+            tempDir.copy(tempPos).normalize();
+            // Add noise to direction so it doesn't look too uniform
+            tempDir.x += Math.sin(i + state.clock.elapsedTime) * 0.2;
+            tempDir.z += Math.cos(i + state.clock.elapsedTime) * 0.2;
+            tempDir.normalize();
+            
+            // Push out by dispersion factor * magnitude (25 matches foliage)
+            tempPos.addScaledVector(tempDir, d * 25.0);
+        }
         
         // Rotate gifts/balls slowly
         dummy.position.copy(tempPos);
@@ -155,6 +164,14 @@ const Ornaments: React.FC<OrnamentsProps> = ({ progress }) => {
         const localP = THREE.MathUtils.smoothstep(p, 0.0, 0.8); // Lights arrive fast
         
         tempPos.lerpVectors(data.chaosPos, data.targetPos, localP);
+
+        // Apply Dispersion to Lights too
+        if (d > 0.001) {
+            tempDir.copy(tempPos).normalize();
+            tempDir.y += Math.sin(i) * 0.5; // Lights fly a bit more erratically
+            tempDir.normalize();
+            tempPos.addScaledVector(tempDir, d * 30.0); // Lights fly slightly further
+        }
         
         dummy.position.copy(tempPos);
         // Lights pulse

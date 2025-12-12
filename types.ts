@@ -42,5 +42,10 @@ export interface PhotoMemory {
 export interface CursorData {
   x: number; // Normalized 0-1
   y: number; // Normalized 0-1
-  isPointing: boolean;
+  isPointing: boolean; // Tracks if hand is visible/active
+  isPinching: boolean; // Tracks if user is pinching (Thumb + Index touching)
+  dispersion: number; // Tracks combined dispersion effect (0 to 1)
+  
+  // Input states
+  isHandOpen?: boolean;
 }

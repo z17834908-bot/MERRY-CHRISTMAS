@@ -19,7 +19,7 @@ const HandControl: React.FC<HandControlProps> = ({ setTreeState, currentTreeStat
   
   // Throttling ref
   const lastPredictionTime = useRef<number>(0);
-  const DETECTION_INTERVAL = 30; // Faster detection for smooth cursor
+  const DETECTION_INTERVAL = 30; 
 
   // Gesture tracking
   const lastWristX = useRef<number | null>(null);
@@ -97,86 +97,88 @@ const HandControl: React.FC<HandControlProps> = ({ setTreeState, currentTreeStat
             const landmarks = results.landmarks[0]; 
             const wrist = landmarks[0];
 
-            // --- Rotation Gesture Logic (only if not pointing) ---
-            if (lastWristX.current !== null) {
-                const dx = wrist.x - lastWristX.current;
-                if (Math.abs(dx) > 0.01) {
-                    rotationSpeedRef.current += dx * 30;
-                    rotationSpeedRef.current = Math.max(Math.min(rotationSpeedRef.current, 5), -5);
+            // Update Cursor Position: Use midpoint between Thumb Tip (4) and Index Tip (8)
+            const thumbTip = landmarks[4];
+            const indexTip = landmarks[8];
+            const midX = (thumbTip.x + indexTip.x) / 2;
+            const midY = (thumbTip.y + indexTip.y) / 2;
+
+            // Invert X for mirror effect
+            cursorRef.current.x = 1 - midX;
+            cursorRef.current.y = midY;
+            cursorRef.current.isPointing = true;
+
+            // --- 1. DETECT PINCH (Selection) ---
+            const pinchDist = Math.sqrt(
+                Math.pow(thumbTip.x - indexTip.x, 2) + 
+                Math.pow(thumbTip.y - indexTip.y, 2)
+            );
+            // Threshold for pinch (0.05 is relatively close in normalized coords)
+            cursorRef.current.isPinching = pinchDist < 0.05;
+
+
+            // --- 2. DETECT FINGERS OPEN/CLOSED ---
+            // Tips: [Thumb:4, Index:8, Middle:12, Ring:16, Pinky:20]
+            // PIPs: [Thumb:2, Index:6, Middle:10, Ring:14, Pinky:18]
+            
+            const isFingerOpen = (tipIdx: number, pipIdx: number) => {
+                 const distTip = Math.sqrt(Math.pow(landmarks[tipIdx].x - wrist.x, 2) + Math.pow(landmarks[tipIdx].y - wrist.y, 2));
+                 const distPip = Math.sqrt(Math.pow(landmarks[pipIdx].x - wrist.x, 2) + Math.pow(landmarks[pipIdx].y - wrist.y, 2));
+                 return distTip > distPip;
+            };
+
+            const indexOpen = isFingerOpen(8, 6);
+            const middleOpen = isFingerOpen(12, 10);
+            const ringOpen = isFingerOpen(16, 14);
+            const pinkyOpen = isFingerOpen(20, 18);
+            
+            // Thumb open check
+            const thumbOpen = Math.sqrt(Math.pow(landmarks[4].x - landmarks[17].x, 2)) > 0.15; // Distance from pinky base
+            
+            const openCount = (indexOpen?1:0) + (middleOpen?1:0) + (ringOpen?1:0) + (pinkyOpen?1:0) + (thumbOpen?1:0);
+
+            // --- 3. DISPERSION (OPEN PALM) ---
+            // If all fingers are open, update isHandOpen state
+            const isOpenPalm = openCount === 5;
+            cursorRef.current.isHandOpen = isOpenPalm;
+
+            // --- 4. STATE LOGIC ---
+
+            // SCISSORS (Victory) -> Index & Middle Open, Ring & Pinky Closed (Thumb can be whatever)
+            // Action: Gallery Mode (Chaos + Rotation)
+            const isScissors = indexOpen && middleOpen && !ringOpen && !pinkyOpen;
+            
+            // FIST -> All fingers closed (0 or 1 if thumb is weird)
+            // Action: Form Tree
+            const isFist = openCount <= 1;
+
+            if (isScissors) {
+                if (currentTreeState !== TreeState.CHAOS) {
+                    setTreeState(TreeState.CHAOS);
+                }
+                // Add spin to browse gallery
+                rotationSpeedRef.current = 1.0; 
+            } else if (isFist) {
+                 if (currentTreeState !== TreeState.FORMED) {
+                    setTreeState(TreeState.FORMED);
+                 }
+            } else {
+                // Rotation logic using wrist movement (Standard wave)
+                if (lastWristX.current !== null) {
+                    const dx = wrist.x - lastWristX.current;
+                    if (Math.abs(dx) > 0.01) {
+                        rotationSpeedRef.current += dx * 30;
+                        rotationSpeedRef.current = Math.max(Math.min(rotationSpeedRef.current, 5), -5);
+                    }
                 }
             }
             lastWristX.current = wrist.x;
 
-            // --- State Switching & Pointing Logic ---
-            
-            // Finger indices: [Thumb, Index, Middle, Ring, Pinky]
-            // Tips: 4, 8, 12, 16, 20
-            // PIPs: 2, 6, 10, 14, 18
-            const fingerTips = [8, 12, 16, 20];
-            const fingerPips = [6, 10, 14, 18];
-            
-            let openFingersCount = 0;
-            // Check non-thumb fingers
-            for(let i=0; i<4; i++) {
-                const tip = landmarks[fingerTips[i]];
-                const pip = landmarks[fingerPips[i]];
-                // Simple distance check from wrist for robustness
-                const distTip = Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
-                const distPip = Math.sqrt(Math.pow(pip.x - wrist.x, 2) + Math.pow(pip.y - wrist.y, 2));
-                if (distTip > distPip) {
-                    openFingersCount++;
-                }
-            }
-
-            // Check thumb separately (tip vs IP joint)
-            const thumbTip = landmarks[4];
-            const thumbIp = landmarks[3];
-             // x-axis check is better for thumb depending on hand side, but simple distance from pinky base (17) works too
-             // Simplified: just check if thumb is extended away from palm center
-             // Let's stick to the main 4 fingers for state mainly
-            
-             const isIndexOpen = (Math.sqrt(Math.pow(landmarks[8].x - wrist.x, 2) + Math.pow(landmarks[8].y - wrist.y, 2)) > 
-                                  Math.sqrt(Math.pow(landmarks[6].x - wrist.x, 2) + Math.pow(landmarks[6].y - wrist.y, 2)));
-
-
-            // 1. CHAOS: Open Hand (>= 4 fingers open)
-            if (openFingersCount >= 3) {
-              setTreeState(TreeState.CHAOS);
-              cursorRef.current.isPointing = false;
-            } 
-            // 2. FORMED: Fist (0 fingers open) -> User must make a fist
-            else if (openFingersCount === 0) {
-              setTreeState(TreeState.FORMED);
-              cursorRef.current.isPointing = false;
-            }
-            // 3. POINTING: Index Open ONLY (roughly)
-            else if (openFingersCount === 1 && isIndexOpen) {
-                // Do NOT change tree state
-                cursorRef.current.isPointing = true;
-                
-                // Map coordinates
-                // MediaPipe X is flipped for mirror effect usually, but here we want screen coords.
-                // Video is mirrored in CSS (-scale-x-100).
-                // Raw landmark x: 0 (left of image) -> 1 (right of image).
-                // Since we mirror via CSS, visual left is x=1.
-                // We want Cursor X=0 (Left) to X=1 (Right).
-                // If I move hand to visual Left, raw X is near 1 (if mirrored).
-                
-                // Let's assume standard webcam:
-                // User moves Right -> Hand in video moves Right (if mirrored).
-                // Landmark X increases. 
-                // We need to invert X for CSS mirroring match?
-                // Let's try 1 - x.
-                
-                cursorRef.current.x = 1 - landmarks[8].x; 
-                cursorRef.current.y = landmarks[8].y; 
-            } else {
-                cursorRef.current.isPointing = false;
-            }
-
           } else {
               lastWristX.current = null;
               cursorRef.current.isPointing = false;
+              cursorRef.current.isPinching = false;
+              cursorRef.current.isHandOpen = false;
           }
       } catch (e) {
           console.error("Detection error:", e);
@@ -216,8 +218,10 @@ const HandControl: React.FC<HandControlProps> = ({ setTreeState, currentTreeStat
         />
         
         <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black via-black/80 to-transparent p-2 text-center">
-             <p className="text-[10px] text-white/90 font-sans tracking-wide">
-               <span className="text-[#D4AF37]">Wave</span> Rotate • <span className="text-[#D4AF37]">Index</span> Point • <span className="text-[#D4AF37]">Fist</span> Form
+             <p className="text-[9px] text-white/90 font-sans tracking-wide leading-tight">
+               <span className="text-[#D4AF37] font-bold">✌️ SCISSORS</span> Gallery <br/>
+               <span className="text-[#D4AF37] font-bold">✊ FIST</span> Tree <br/>
+               <span className="text-[#D4AF37] font-bold">✋ PALM</span> Disperse
              </p>
         </div>
       </div>

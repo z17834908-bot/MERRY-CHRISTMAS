@@ -2,14 +2,17 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TREE_CONFIG, PALETTE } from '../constants';
+import { CursorData } from '../types';
 
 interface StarProps {
   progress: React.MutableRefObject<number>;
+  cursorRef: React.MutableRefObject<CursorData>;
 }
 
-const Star: React.FC<StarProps> = ({ progress }) => {
+const Star: React.FC<StarProps> = ({ progress, cursorRef }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
+  const dispersionValue = useRef(0);
 
   const starShape = useMemo(() => {
     const shape = new THREE.Shape();
@@ -38,25 +41,33 @@ const Star: React.FC<StarProps> = ({ progress }) => {
     bevelSegments: 2,
   };
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (meshRef.current && glowRef.current) {
       const t = state.clock.getElapsedTime();
       const p = progress.current;
+      
+      // Dispersion
+      const targetDispersion = cursorRef.current.dispersion;
+      dispersionValue.current = THREE.MathUtils.lerp(dispersionValue.current, targetDispersion, delta * 3.0);
+      const d = dispersionValue.current;
 
       // Position: Moves up slightly when formed
       const targetY = TREE_CONFIG.HEIGHT + 0.5;
       const chaosY = TREE_CONFIG.HEIGHT + 5;
       
       // Interpolate Position
-      const currentY = THREE.MathUtils.lerp(chaosY, targetY, p);
+      let currentY = THREE.MathUtils.lerp(chaosY, targetY, p);
+      
+      // Apply Dispersion (Star shoots up to the heavens)
+      currentY += d * 30.0;
       
       meshRef.current.position.set(0, currentY, 0);
       glowRef.current.position.set(0, currentY, 0);
 
-      // Rotation: Spins faster in chaos
-      const rotationSpeed = THREE.MathUtils.lerp(2.0, 0.5, p);
+      // Rotation: Spins faster in chaos or dispersion
+      const rotationSpeed = THREE.MathUtils.lerp(2.0, 0.5, p) + (d * 5.0);
       meshRef.current.rotation.y = t * rotationSpeed;
-      meshRef.current.rotation.z = Math.sin(t) * 0.1; // Slight tilt
+      meshRef.current.rotation.z = Math.sin(t) * 0.1 + (d * Math.sin(t * 10) * 0.5); // Slight tilt, crazy tilt on dispersion
       
       glowRef.current.rotation.y = t * rotationSpeed;
       
@@ -66,7 +77,7 @@ const Star: React.FC<StarProps> = ({ progress }) => {
       glowRef.current.scale.setScalar(scale * 1.5);
 
       // Pulse the glow
-      const pulse = 1 + Math.sin(t * 3) * 0.2;
+      const pulse = 1 + Math.sin(t * 3) * 0.2 + (d * 1.0); // Intense pulse on dispersion
       glowRef.current.scale.multiplyScalar(pulse);
     }
   });

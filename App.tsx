@@ -10,8 +10,16 @@ const App: React.FC = () => {
   const [treeState, setTreeState] = useState<TreeState>(TreeState.CHAOS);
   const [memories, setMemories] = useState<PhotoMemory[]>([]);
   
-  // Shared ref for cursor data (x, y, isPointing) to avoid re-renders on every frame
-  const cursorRef = useRef<CursorData>({ x: 0, y: 0, isPointing: false });
+  // Shared ref for cursor data
+  // Removed isMouseDown tracking
+  const cursorRef = useRef<CursorData>({ 
+    x: 0, 
+    y: 0, 
+    isPointing: false, 
+    isPinching: false, 
+    dispersion: 0,
+    isHandOpen: false
+  });
   
   // Ref to control rotation speed shared between HandControl and Experience
   const rotationSpeedRef = useRef<number>(0.2);
@@ -121,7 +129,7 @@ const App: React.FC = () => {
 
 // Simple visual feedback for the hand cursor
 const CursorOverlay: React.FC<{ cursorRef: React.MutableRefObject<CursorData> }> = ({ cursorRef }) => {
-  const [pos, setPos] = useState({ x: 0, y: 0, active: false });
+  const [pos, setPos] = useState({ x: 0, y: 0, active: false, pinching: false });
   const requestRef = useRef<number>(0);
 
   const animate = () => {
@@ -129,7 +137,8 @@ const CursorOverlay: React.FC<{ cursorRef: React.MutableRefObject<CursorData> }>
       setPos({ 
         x: cursorRef.current.x * 100, 
         y: cursorRef.current.y * 100, 
-        active: true 
+        active: true,
+        pinching: cursorRef.current.isPinching
       });
     } else {
       setPos(p => p.active ? { ...p, active: false } : p);
@@ -146,14 +155,14 @@ const CursorOverlay: React.FC<{ cursorRef: React.MutableRefObject<CursorData> }>
 
   return (
     <div 
-      className="absolute w-6 h-6 border-2 border-[#D4AF37] rounded-full pointer-events-none z-50 transform -translate-x-1/2 -translate-y-1/2 transition-opacity duration-200"
+      className={`absolute w-6 h-6 border-2 rounded-full pointer-events-none z-50 transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 ${pos.pinching ? 'bg-red-500 scale-75 border-red-500' : 'border-[#D4AF37]'}`}
       style={{ 
         left: `${pos.x}%`, 
         top: `${pos.y}%`,
-        boxShadow: '0 0 10px #D4AF37'
+        boxShadow: pos.pinching ? '0 0 15px red' : '0 0 10px #D4AF37'
       }}
     >
-      <div className="absolute inset-0 bg-[#D4AF37] opacity-30 rounded-full animate-ping" />
+      <div className={`absolute inset-0 opacity-30 rounded-full animate-ping ${pos.pinching ? 'bg-red-500' : 'bg-[#D4AF37]'}`} />
     </div>
   );
 };

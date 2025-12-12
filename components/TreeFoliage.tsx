@@ -2,12 +2,14 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TREE_CONFIG, CHAOS_RADIUS, PALETTE } from '../constants';
+import { CursorData } from '../types';
 
 // Custom Shader Material for the Foliage
 const FoliageShaderMaterial = {
   uniforms: {
     uTime: { value: 0 },
     uProgress: { value: 0 },
+    uDispersion: { value: 0 },
     uColorBase: { value: new THREE.Color(PALETTE.EMERALD_DEEP) },
     uColorTip: { value: new THREE.Color(PALETTE.EMERALD_LIGHT) },
     uColorGold: { value: new THREE.Color(PALETTE.GOLD_METALLIC) },
@@ -15,6 +17,7 @@ const FoliageShaderMaterial = {
   vertexShader: `
     uniform float uTime;
     uniform float uProgress;
+    uniform float uDispersion;
     attribute vec3 aChaosPos;
     attribute vec3 aTargetPos;
     attribute float aRandom;
@@ -46,12 +49,25 @@ const FoliageShaderMaterial = {
         pos.z += wind * 0.5;
       }
 
+      // --- DISPERSION (Hand Open Effect) ---
+      // Explode outwards from center based on uDispersion
+      // We add some noise to the direction so it doesn't look like a perfect shell expansion
+      vec3 noiseDir = vec3(
+          sin(aRandom * 100.0 + uTime),
+          cos(aRandom * 50.0 + uTime),
+          sin(aRandom * 20.0 + uTime)
+      );
+      vec3 explodeDir = normalize(pos) + (noiseDir * 0.5);
+      
+      // Dispersion strength expands the tree
+      pos += explodeDir * uDispersion * 25.0;
+
       vHeight = pos.y; // Pass height for color gradient
       
       vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
       gl_Position = projectionMatrix * mvPosition;
       
-      // Size attenuation - MUCH SMALLER PARTICLES
+      // Size attenuation
       // Base size reduced to 12.0 (was 30.0), minimum 2.0
       gl_PointSize = (14.0 * aRandom + 4.0) * (1.0 / -mvPosition.z);
     }
@@ -83,16 +99,23 @@ const FoliageShaderMaterial = {
       } else {
         gl_FragColor = vec4(finalColor, 1.0);
       }
+      
+      #include <tonemapping_fragment>
+      #include <encodings_fragment>
     }
   `
 };
 
 interface TreeFoliageProps {
   progress: React.MutableRefObject<number>;
+  cursorRef: React.MutableRefObject<CursorData>;
 }
 
-const TreeFoliage: React.FC<TreeFoliageProps> = ({ progress }) => {
+const TreeFoliage: React.FC<TreeFoliageProps> = ({ progress, cursorRef }) => {
   const shaderRef = useRef<THREE.ShaderMaterial>(null);
+  
+  // Local ref for smoothing dispersion value
+  const dispersionValue = useRef(0);
   
   // Generate Geometry Data
   const { positions, chaosPositions, randoms } = useMemo(() => {
@@ -112,8 +135,6 @@ const TreeFoliage: React.FC<TreeFoliageProps> = ({ progress }) => {
       const theta = Math.random() * Math.PI * 2;
       
       // Volume filling distribution
-      // Using power 0.4 pushes particles slightly towards the surface edge (rMax)
-      // This makes the tree shape more defined/solid than a uniform sqrt distribution
       const rad = Math.pow(Math.random(), 0.4) * rMax;
 
       const x = Math.cos(theta) * rad;
@@ -147,10 +168,16 @@ const TreeFoliage: React.FC<TreeFoliageProps> = ({ progress }) => {
     return { positions: pos, chaosPositions: chaos, randoms: rands };
   }, []);
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     if (shaderRef.current) {
       shaderRef.current.uniforms.uTime.value = state.clock.getElapsedTime();
       shaderRef.current.uniforms.uProgress.value = progress.current;
+      
+      // Smoothly interpolate dispersion
+      const targetDispersion = cursorRef.current.dispersion;
+      dispersionValue.current = THREE.MathUtils.lerp(dispersionValue.current, targetDispersion, delta * 3.0);
+      
+      shaderRef.current.uniforms.uDispersion.value = dispersionValue.current;
     }
   });
 
